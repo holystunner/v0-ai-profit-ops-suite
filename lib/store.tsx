@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react"
+import { CREW_AGENTS, type CrewToolId } from "@/lib/crew-catalog"
 
 export interface Agent {
   id: string
@@ -9,6 +10,11 @@ export interface Agent {
   status: "active" | "idle" | "working" | "offline"
   avatar: string
   capabilities: string[]
+  tools?: CrewToolId[]
+  crewKey?: string
+  goal?: string
+  backstory?: string
+  model?: string
   assignedTo?: string
   currentTask?: string
   performance: number
@@ -76,6 +82,20 @@ export interface Task {
   browserRequired: boolean
 }
 
+// A visual task box spawned from the CEO chat interface.
+export interface TaskBox {
+  id: string
+  project: string
+  title: string
+  agentName: string
+  priority: "low" | "medium" | "high" | "critical"
+  browser: boolean
+  status: "queued" | "in-progress" | "completed" | "failed"
+  progress: number
+  logs: string[]
+  createdAt: Date
+}
+
 export interface Empire {
   id: string
   name: string
@@ -102,37 +122,59 @@ export interface Empire {
   createdAt: Date
 }
 
+export type ActiveView =
+  | "chat"
+  | "dashboard"
+  | "empires"
+  | "projects"
+  | "agents"
+  | "browser"
+  | "settings"
+
 interface StoreContextType {
   // CEO Agent
   ceoAgent: Agent
-  
+
   // Empires
   empires: Empire[]
   activeEmpire: Empire | null
   setActiveEmpire: (empire: Empire | null) => void
   createEmpire: (empire: Omit<Empire, "id" | "createdAt" | "projects" | "metrics">) => Empire
   updateEmpire: (id: string, updates: Partial<Empire>) => void
-  
+
   // Projects
   activeProject: Project | null
   setActiveProject: (project: Project | null) => void
   createProject: (empireId: string, project: Omit<Project, "id" | "createdAt" | "workers" | "browserSessions">) => Project
   launchProject: (projectId: string) => void
-  
+
   // Agents
   availableAgents: Agent[]
   assignAgent: (agentId: string, projectId: string) => void
-  
+
   // Browser Sessions
   browserSessions: BrowserSession[]
   createBrowserSession: (agentId: string, projectId: string, url: string, action: string) => BrowserSession
-  
+
+  // Task boxes (spawned from CEO chat)
+  taskBoxes: TaskBox[]
+  addTaskBoxes: (
+    project: string,
+    tasks: Array<Omit<TaskBox, "id" | "status" | "progress" | "logs" | "createdAt" | "project">>,
+  ) => void
+  updateTaskBox: (id: string, updates: Partial<TaskBox>) => void
+  clearTaskBoxes: () => void
+
+  // Standing context: files/knowledge the crew must know
+  standingContext: string
+  setStandingContext: (ctx: string) => void
+
   // UI State
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
-  activeView: "dashboard" | "empires" | "projects" | "agents" | "browser" | "settings"
-  setActiveView: (view: "dashboard" | "empires" | "projects" | "agents" | "browser" | "settings") => void
-  
+  activeView: ActiveView
+  setActiveView: (view: ActiveView) => void
+
   // Modals
   showNewEmpireModal: boolean
   setShowNewEmpireModal: (show: boolean) => void
@@ -152,164 +194,42 @@ const initialCeoAgent: Agent = {
   role: "ceo",
   status: "active",
   avatar: "/agents/kassandra.png",
-  capabilities: ["strategic-planning", "resource-allocation", "empire-oversight", "communication", "browser-automation"],
-  performance: 98,
-  browserSessions: 3
+  capabilities: ["strategic-planning", "resource-allocation", "empire-oversight", "communication"],
+  model: "google/gemma-4-31b-it",
+  goal: "Plan, communicate, and directly assist John in running all empires, projects, agents, and bot swarms.",
+  performance: 100,
+  browserSessions: 0,
 }
 
-const initialAgents: Agent[] = [
-  {
-    id: "emp-001",
-    name: "Atlas",
-    role: "empire-manager",
-    status: "active",
-    avatar: "/agents/atlas.png",
-    capabilities: ["empire-management", "scaling", "optimization", "browser-automation"],
-    performance: 95,
-    browserSessions: 2
-  },
-  {
-    id: "emp-002",
-    name: "Nova",
-    role: "empire-manager",
-    status: "idle",
-    avatar: "/agents/nova.png",
-    capabilities: ["empire-management", "analytics", "reporting", "browser-automation"],
-    performance: 92,
-    browserSessions: 0
-  },
-  {
-    id: "pm-001",
-    name: "Orion",
-    role: "project-manager",
-    status: "working",
-    avatar: "/agents/orion.png",
-    capabilities: ["project-management", "task-delegation", "quality-assurance", "browser-automation"],
-    currentTask: "Deploying e-commerce platform",
-    performance: 94,
-    browserSessions: 4
-  },
-  {
-    id: "pm-002",
-    name: "Luna",
-    role: "project-manager",
-    status: "active",
-    avatar: "/agents/luna.png",
-    capabilities: ["project-management", "client-communication", "browser-automation"],
-    performance: 91,
-    browserSessions: 1
-  },
-  {
-    id: "wk-001",
-    name: "Spark",
-    role: "worker",
-    status: "working",
-    avatar: "/agents/spark.png",
-    capabilities: ["frontend-development", "ui-design", "browser-testing"],
-    currentTask: "Building landing page",
-    performance: 89,
-    browserSessions: 6
-  },
-  {
-    id: "wk-002",
-    name: "Bolt",
-    role: "worker",
-    status: "working",
-    avatar: "/agents/bolt.png",
-    capabilities: ["backend-development", "api-integration", "browser-automation"],
-    currentTask: "Setting up payment gateway",
-    performance: 93,
-    browserSessions: 3
-  },
-  {
-    id: "wk-003",
-    name: "Pixel",
-    role: "worker",
-    status: "active",
-    avatar: "/agents/pixel.png",
-    capabilities: ["design", "branding", "asset-creation", "browser-research"],
-    performance: 88,
-    browserSessions: 2
-  },
-  {
-    id: "wk-004",
-    name: "Circuit",
-    role: "worker",
-    status: "idle",
-    avatar: "/agents/circuit.png",
-    capabilities: ["devops", "deployment", "monitoring", "browser-automation"],
-    performance: 96,
-    browserSessions: 0
-  }
-]
-
-const initialEmpires: Empire[] = [
-  {
-    id: "empire-001",
-    name: "TechVentures Global",
-    description: "AI-powered SaaS products and digital solutions",
-    status: "active",
-    manager: initialAgents[0],
-    projects: [],
-    files: {
-      brand: [{ id: "f1", name: "brand-guidelines.pdf", type: "documentation", size: 2400000, uploadedAt: new Date() }],
-      governing: [{ id: "f2", name: "governance-charter.pdf", type: "documentation", size: 1200000, uploadedAt: new Date() }],
-      vision: [{ id: "f3", name: "vision-2025.pdf", type: "documentation", size: 800000, uploadedAt: new Date() }],
-      goals: [{ id: "f4", name: "q1-objectives.pdf", type: "documentation", size: 600000, uploadedAt: new Date() }],
-      credentials: [],
-      assets: [{ id: "f5", name: "logo-pack.zip", type: "asset", size: 15000000, uploadedAt: new Date() }],
-      code: []
-    },
-    metrics: {
-      revenue: 125000,
-      growth: 23.5,
-      activeProjects: 4,
-      totalAgents: 12,
-      browserSessions: 18
-    },
-    createdAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
-  }
-]
-
-const initialBrowserSessions: BrowserSession[] = [
-  {
-    id: "bs-001",
-    agentId: "wk-001",
-    url: "https://stripe.com/dashboard",
-    status: "active",
-    action: "Configuring payment webhooks",
-    startedAt: new Date(Date.now() - 15 * 60 * 1000),
-    logs: ["Navigated to Stripe dashboard", "Logged in successfully", "Navigating to webhooks section"]
-  },
-  {
-    id: "bs-002",
-    agentId: "wk-002",
-    url: "https://vercel.com/dashboard",
-    status: "active",
-    action: "Deploying production build",
-    startedAt: new Date(Date.now() - 8 * 60 * 1000),
-    logs: ["Opened Vercel dashboard", "Selected project", "Initiating deployment"]
-  },
-  {
-    id: "bs-003",
-    agentId: "pm-001",
-    url: "https://github.com/org/repo",
-    status: "completed",
-    action: "Reviewing pull requests",
-    startedAt: new Date(Date.now() - 45 * 60 * 1000),
-    logs: ["Reviewed PR #142", "Approved and merged", "Session completed"]
-  }
-]
+// Agent library seeded from the user's real CrewAI crew catalog.
+const initialAgents: Agent[] = CREW_AGENTS.map((a) => ({
+  id: a.key,
+  name: a.name,
+  role: a.tier,
+  status: "idle" as const,
+  avatar: "/agents/generic.png",
+  capabilities: a.tools,
+  tools: a.tools,
+  crewKey: a.key,
+  goal: a.goal,
+  backstory: a.backstory,
+  model: a.model,
+  performance: 0,
+  browserSessions: 0,
+}))
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [ceoAgent] = useState<Agent>(initialCeoAgent)
-  const [empires, setEmpires] = useState<Empire[]>(initialEmpires)
-  const [activeEmpire, setActiveEmpire] = useState<Empire | null>(initialEmpires[0])
+  // Clean production start — zero empires, zero sessions.
+  const [empires, setEmpires] = useState<Empire[]>([])
+  const [activeEmpire, setActiveEmpire] = useState<Empire | null>(null)
   const [activeProject, setActiveProject] = useState<Project | null>(null)
   const [availableAgents, setAvailableAgents] = useState<Agent[]>(initialAgents)
-  const [browserSessions, setBrowserSessions] = useState<BrowserSession[]>(initialBrowserSessions)
+  const [browserSessions, setBrowserSessions] = useState<BrowserSession[]>([])
+  const [taskBoxes, setTaskBoxes] = useState<TaskBox[]>([])
+  const [standingContext, setStandingContext] = useState<string>("")
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [activeView, setActiveView] = useState<"dashboard" | "empires" | "projects" | "agents" | "browser" | "settings">("dashboard")
+  const [activeView, setActiveView] = useState<ActiveView>("chat")
   const [showNewEmpireModal, setShowNewEmpireModal] = useState(false)
   const [showNewProjectModal, setShowNewProjectModal] = useState(false)
   const [showAgentDetailModal, setShowAgentDetailModal] = useState(false)
@@ -320,54 +240,57 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ...empireData,
       id: `empire-${Date.now()}`,
       projects: [],
-      metrics: {
-        revenue: 0,
-        growth: 0,
-        activeProjects: 0,
-        totalAgents: 0,
-        browserSessions: 0
-      },
-      createdAt: new Date()
+      metrics: { revenue: 0, growth: 0, activeProjects: 0, totalAgents: 0, browserSessions: 0 },
+      createdAt: new Date(),
     }
-    setEmpires(prev => [...prev, newEmpire])
+    setEmpires((prev) => [...prev, newEmpire])
     return newEmpire
   }, [])
 
   const updateEmpire = useCallback((id: string, updates: Partial<Empire>) => {
-    setEmpires(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e))
+    setEmpires((prev) => prev.map((e) => (e.id === id ? { ...e, ...updates } : e)))
   }, [])
 
-  const createProject = useCallback((empireId: string, projectData: Omit<Project, "id" | "createdAt" | "workers" | "browserSessions">) => {
-    const newProject: Project = {
-      ...projectData,
-      id: `project-${Date.now()}`,
-      workers: [],
-      browserSessions: [],
-      createdAt: new Date()
-    }
-    setEmpires(prev => prev.map(e => 
-      e.id === empireId 
-        ? { ...e, projects: [...e.projects, newProject], metrics: { ...e.metrics, activeProjects: e.metrics.activeProjects + 1 } }
-        : e
-    ))
-    return newProject
-  }, [])
+  const createProject = useCallback(
+    (empireId: string, projectData: Omit<Project, "id" | "createdAt" | "workers" | "browserSessions">) => {
+      const newProject: Project = {
+        ...projectData,
+        id: `project-${Date.now()}`,
+        workers: [],
+        browserSessions: [],
+        createdAt: new Date(),
+      }
+      setEmpires((prev) =>
+        prev.map((e) =>
+          e.id === empireId
+            ? {
+                ...e,
+                projects: [...e.projects, newProject],
+                metrics: { ...e.metrics, activeProjects: e.metrics.activeProjects + 1 },
+              }
+            : e,
+        ),
+      )
+      return newProject
+    },
+    [],
+  )
 
   const launchProject = useCallback((projectId: string) => {
-    setEmpires(prev => prev.map(e => ({
-      ...e,
-      projects: e.projects.map(p => 
-        p.id === projectId 
-          ? { ...p, status: "active" as const, launchedAt: new Date() }
-          : p
-      )
-    })))
+    setEmpires((prev) =>
+      prev.map((e) => ({
+        ...e,
+        projects: e.projects.map((p) =>
+          p.id === projectId ? { ...p, status: "active" as const, launchedAt: new Date() } : p,
+        ),
+      })),
+    )
   }, [])
 
   const assignAgent = useCallback((agentId: string, projectId: string) => {
-    setAvailableAgents(prev => prev.map(a => 
-      a.id === agentId ? { ...a, assignedTo: projectId, status: "working" as const } : a
-    ))
+    setAvailableAgents((prev) =>
+      prev.map((a) => (a.id === agentId ? { ...a, assignedTo: projectId, status: "working" as const } : a)),
+    )
   }, [])
 
   const createBrowserSession = useCallback((agentId: string, projectId: string, url: string, action: string) => {
@@ -378,41 +301,69 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       status: "active",
       action,
       startedAt: new Date(),
-      logs: [`Initiated browser session for ${action}`]
+      logs: [`Initiated browser session for ${action}`],
     }
-    setBrowserSessions(prev => [...prev, newSession])
+    setBrowserSessions((prev) => [...prev, newSession])
     return newSession
   }, [])
 
+  const addTaskBoxes = useCallback<StoreContextType["addTaskBoxes"]>((project, tasks) => {
+    const now = Date.now()
+    const boxes: TaskBox[] = tasks.map((t, i) => ({
+      ...t,
+      id: `task-${now}-${i}`,
+      project,
+      status: "queued",
+      progress: 0,
+      logs: [`Task queued by Kassandra — assigned to ${t.agentName}`],
+      createdAt: new Date(),
+    }))
+    setTaskBoxes((prev) => [...boxes, ...prev])
+  }, [])
+
+  const updateTaskBox = useCallback((id: string, updates: Partial<TaskBox>) => {
+    setTaskBoxes((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)))
+  }, [])
+
+  const clearTaskBoxes = useCallback(() => setTaskBoxes([]), [])
+
   return (
-    <StoreContext.Provider value={{
-      ceoAgent,
-      empires,
-      activeEmpire,
-      setActiveEmpire,
-      createEmpire,
-      updateEmpire,
-      activeProject,
-      setActiveProject,
-      createProject,
-      launchProject,
-      availableAgents,
-      assignAgent,
-      browserSessions,
-      createBrowserSession,
-      sidebarOpen,
-      setSidebarOpen,
-      activeView,
-      setActiveView,
-      showNewEmpireModal,
-      setShowNewEmpireModal,
-      showNewProjectModal,
-      setShowNewProjectModal,
-      showAgentDetailModal,
-      setShowAgentDetailModal,
-      selectedAgent,
-      setSelectedAgent
-    }}>
+    <StoreContext.Provider
+      value={{
+        ceoAgent,
+        empires,
+        activeEmpire,
+        setActiveEmpire,
+        createEmpire,
+        updateEmpire,
+        activeProject,
+        setActiveProject,
+        createProject,
+        launchProject,
+        availableAgents,
+        assignAgent,
+        browserSessions,
+        createBrowserSession,
+        taskBoxes,
+        addTaskBoxes,
+        updateTaskBox,
+        clearTaskBoxes,
+        standingContext,
+        setStandingContext,
+        sidebarOpen,
+        setSidebarOpen,
+        activeView,
+        setActiveView,
+        showNewEmpireModal,
+        setShowNewEmpireModal,
+        showNewProjectModal,
+        setShowNewProjectModal,
+        showAgentDetailModal,
+        setShowAgentDetailModal,
+        selectedAgent,
+        setSelectedAgent,
+      }}
+    >
       {children}
     </StoreContext.Provider>
   )
