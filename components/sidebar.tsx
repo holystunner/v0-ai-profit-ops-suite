@@ -11,11 +11,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Sparkles,
-  Activity
+  Activity,
+  MessageSquare
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const navItems = [
+  { id: "chat", label: "Kassandra Chat", icon: MessageSquare },
   { id: "dashboard", label: "Command Centre", icon: LayoutDashboard },
   { id: "empires", label: "Empires", icon: Building2 },
   { id: "projects", label: "Projects", icon: FolderKanban },
